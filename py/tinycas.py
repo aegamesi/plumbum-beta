@@ -5,7 +5,7 @@ EXPRESSION_GROUP = 'group' # A group of expressions added together. Highest prec
 EXPRESSION_FUNC = 'func' # A function call - (name, [args])
 EXPRESSION_POWER = 'power' # Raising an expression to an exponent - (base, exponent)
 EXPRESSION_MUL = 'mul' # a list of expressions multiplied together - [expressions]
-EXPRESSION_DIV = 'div' # one expression divided by another - (num, div)
+negative_one = (EXPRESSION_CONSTANT, -1)
 
 def parse(string):
 	"""Parses a string, returns an expression"""
@@ -94,6 +94,9 @@ def parse(string):
 			return (EXPRESSION_CONSTANT, pop()[1])
 		if peeked[0] == TOKEN_NAME:
 			return (EXPRESSION_NAME, pop()[1])
+		if peeked[0] == TOKEN_OPERATOR and peeked[1] == '-':
+			pop()
+			return (EXPRESSION_MUL, [negative_one, read_unit()])
 
 		raise Exception("Invalid unit")
 
@@ -125,7 +128,7 @@ def parse(string):
 					chunk = read_chunk()
 					# TODO if it's '-', multiply the chunk by -1
 					if token[1] == '-':
-						chunk = (EXPRESSION_MUL, [(EXPRESSION_CONSTANT, -1), chunk])
+						chunk = (EXPRESSION_MUL, [negative_one, chunk])
 					group.append(chunk)
 					continue
 
@@ -170,9 +173,8 @@ def parse(string):
 						pop()
 						assert len(chunk) > 0, "Unexpected '/' when parsing expression"
 						assert len(tokens) > 0, "Unexpected '/' when parsing expression"
-						numerator = chunk.pop()
-						denomenator = read_unit()
-						chunk.append((EXPRESSION_DIV, (numerator, denomenator)))
+						divisor = read_unit()
+						chunk.append((EXPRESSION_POWER, (divisor, negative_one)))
 						continue
 
 					if peeked[1] == '*':
