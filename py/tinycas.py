@@ -89,7 +89,7 @@ def parse(string):
 		"""
 		peeked = peek()
 		if peeked[0] == TOKEN_GROUP:
-			return read_chunk()
+			return read_group()
 		if peeked[0] == TOKEN_NUMBER:
 			return (EXPRESSION_CONSTANT, pop()[1])
 		if peeked[0] == TOKEN_NAME:
@@ -99,6 +99,30 @@ def parse(string):
 			return (EXPRESSION_MUL, [negative_one, read_unit()])
 
 		raise Exception("Invalid unit")
+
+	def read_group():
+		pop()
+
+		group = []
+		while len(tokens):
+			token = peek()
+			if token[0] == TOKEN_GROUP and token[1] == 1:
+				pop()
+				break
+			if token[0] == TOKEN_OPERATOR and (token[1] == '+' or token[1] == '-'):
+				pop()
+				chunk = read_chunk()
+				# TODO if it's '-', multiply the chunk by -1
+				if token[1] == '-':
+					chunk = (EXPRESSION_MUL, [negative_one, chunk])
+				group.append(chunk)
+				continue
+
+			group.append(read_chunk())
+
+		if len(group) == 1:
+			return group[0]
+		return (EXPRESSION_GROUP, group)
 
 	def read_chunk():
 		"""
@@ -110,99 +134,71 @@ def parse(string):
 		A "group" is a set of terms added (or subtracted...) together
 		"""
 		peeked = peek()
-		is_group = peeked[0] == TOKEN_GROUP
-		if is_group:
-			assert peeked[1] == 0, "Unexpected close paren while parsing group"
+		chunk = [] # a set of things multiplied together
+		negative = False
+		if peeked[0] == TOKEN_OPERATOR and peeked[0] == '-':
+			negative = True
+			pop()
+		
+		while len(tokens):
+			peeked = peek()
 
-			pop() # get rid of the opening paren
-
-			# keep reading more chunks until we get a close paren
-			group = []
-			while len(tokens):
-				token = peek()
-				if token[0] == TOKEN_GROUP and token[1] == 1:
-					pop()
+			if peeked[0] == TOKEN_GROUP:
+				if peeked[1] == 0:
+					group = read_group()
+					chunk.append(group)
+					continue
+				if peeked[1] == 1:
 					break
-				if token[0] == TOKEN_OPERATOR and (token[1] == '+' or token[1] == '-'):
+
+			if peeked[0] == TOKEN_OPERATOR:
+				# stop if it's an addition or subtraction operator
+				if peeked[1] == '+' or peeked[1] == '-':
+					break
+
+				if peeked[1] == '^':
 					pop()
-					chunk = read_chunk()
-					# TODO if it's '-', multiply the chunk by -1
-					if token[1] == '-':
-						chunk = (EXPRESSION_MUL, [negative_one, chunk])
-					group.append(chunk)
+					assert len(chunk) > 0, "Unexpected '^' when parsing expression"
+					assert len(tokens) > 0, "Unexpected '^' when parsing expression"
+					base = chunk.pop()
+					exp = read_unit()
+					chunk.append((EXPRESSION_POWER, (base, exp)))
 					continue
 
-				group.append(read_chunk())
+				if peeked[1] == '/':
+					pop()
+					assert len(chunk) > 0, "Unexpected '/' when parsing expression"
+					assert len(tokens) > 0, "Unexpected '/' when parsing expression"
+					divisor = read_unit()
+					chunk.append((EXPRESSION_POWER, (divisor, negative_one)))
+					continue
 
-			if len(group) == 1:
-				return group[0]
-			return (EXPRESSION_GROUP, group)
+				if peeked[1] == '*':
+					pop()
+					assert len(chunk) > 0, "Unexpected '*' when parsing expression"
+					assert len(tokens) > 0, "Unexpected '*' when parsing expression"
+					chunk.append(read_unit())
+					continue
 
-		else:
-			chunk = [] # a set of things multiplied together
-			negative = False
-			if peeked[0] == TOKEN_OPERATOR and peeked[0] == '-':
-				negative = True
-				pop()
-			
-			while len(tokens):
-				peeked = peek()
+				# TODO function call
 
-				if peeked[0] == TOKEN_GROUP:
-					if peeked[1] == 0:
-						chunk.append(read_chunk())
-						continue
-					if peeked[1] == 1:
-						break
-
-				if peeked[0] == TOKEN_OPERATOR:
-					# stop if it's an addition or subtraction operator
-					if peeked[1] == '+' or peeked[1] == '-':
-						break
-
-					if peeked[1] == '^':
-						pop()
-						assert len(chunk) > 0, "Unexpected '^' when parsing expression"
-						assert len(tokens) > 0, "Unexpected '^' when parsing expression"
-						base = chunk.pop()
-						exp = read_unit()
-						chunk.append((EXPRESSION_POWER, (base, exp)))
+			unit = read_unit()
+			if unit[0] == EXPRESSION_NAME:
+				# see if it's actually a function call
+				if len(tokens):
+					peeked = peek()
+					if peeked[0] == TOKEN_GROUP and peeked[1] == 0:
+						# it is.
+						argument = read_chunk()
+						chunk.append((EXPRESSION_FUNC, (unit, argument)))
 						continue
 
-					if peeked[1] == '/':
-						pop()
-						assert len(chunk) > 0, "Unexpected '/' when parsing expression"
-						assert len(tokens) > 0, "Unexpected '/' when parsing expression"
-						divisor = read_unit()
-						chunk.append((EXPRESSION_POWER, (divisor, negative_one)))
-						continue
+			chunk.append(unit)
 
-					if peeked[1] == '*':
-						pop()
-						assert len(chunk) > 0, "Unexpected '*' when parsing expression"
-						assert len(tokens) > 0, "Unexpected '*' when parsing expression"
-						chunk.append(read_unit())
-						continue
-
-					# TODO function call
-
-				unit = read_unit()
-				if unit[0] == EXPRESSION_NAME:
-					# see if it's actually a function call
-					if len(tokens):
-						peeked = peek()
-						if peeked[0] == TOKEN_GROUP and peeked[1] == 0:
-							# it is.
-							argument = read_chunk()
-							chunk.append((EXPRESSION_FUNC, (unit, argument)))
-							continue
-
-				chunk.append(unit)
-
-			if len(chunk) == 1:
-				return chunk[0]
-			return (EXPRESSION_MUL, chunk)
-		
+		if len(chunk) == 1:
+			return chunk[0]
+		return (EXPRESSION_MUL, chunk)
+	
 
 	# add an opening and closing paren, and reverse tokens
 	tokens.insert(0, (TOKEN_GROUP, 0))
@@ -210,3 +206,35 @@ def parse(string):
 	tokens.reverse() # so that we can .pop() off tokens
 	expressions = []
 	return read_chunk()
+
+def evaluate(exp):
+	"""
+	Evaluates a given expression
+	"""
+
+	if exp[0] == EXPRESSION_CONSTANT:
+		return exp[1]
+
+	if exp[0] == EXPRESSION_GROUP:
+		sum = 0
+		for e in exp[1]:
+			sum += evaluate(e)
+		return sum
+
+	if exp[0] == EXPRESSION_NAME:
+		return 0 # todo evaluate name or just pass it through
+
+	if exp[0] == EXPRESSION_FUNC:
+		return 0 # todo evaluate function
+
+	if exp[0] == EXPRESSION_POWER:
+		return evaluate(exp[1][0]) ** evaluate(exp[1][1])
+
+	if exp[0] == EXPRESSION_MUL:
+		product = 1
+		for e in exp[1]:
+			product *= evaluate(e)
+		return product
+
+	return 0
+
